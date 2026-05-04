@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # Reproduce the crd2pulumi 1.6.1 _utilities import bug.
 #
+# Bug is platform-dependent:
+#   - Repros on Linux (e.g. Debian 13 arm64, Python 3.13)
+#   - Does NOT repro on macOS arm64 with the same crd2pulumi v1.6.1
+#     binary built from source. This script will print
+#     "Import succeeded" on macOS - that is expected.
+#
 # Requirements:
 #   - crd2pulumi 1.6.1 on PATH (or at $HOME/go/bin/crd2pulumi)
 #   - python3 with pip
 #
 # What this does:
-#   1. Generates a Python SDK from a minimal CRD using crd2pulumi.
-#   2. Tries to import a sub-package of the generated SDK.
-#   3. Fails with ImportError because sub-package __init__.py uses
-#      `from . import _utilities` but _utilities.py only exists at
+#   1. Captures host + binary identity so the result is unambiguous.
+#   2. Generates a Python SDK from a minimal CRD using crd2pulumi.
+#   3. Tries to import a sub-package of the generated SDK.
+#   4. On Linux: fails with ImportError because sub-package __init__.py
+#      uses `from . import _utilities` but _utilities.py only exists at
 #      the top-level package.
 
 set -euo pipefail
@@ -20,13 +27,30 @@ if ! command -v "$CRD2PULUMI" >/dev/null 2>&1; then
     CRD2PULUMI="$HOME/go/bin/crd2pulumi"
   else
     echo "ERROR: crd2pulumi not found. Install via:"
-    echo "  go install github.com/pulumi/crd2pulumi/cmd/crd2pulumi@v1.6.1"
+    echo "  go install github.com/pulumi/crd2pulumi@v1.6.1"
     exit 1
   fi
 fi
 
-echo "=== crd2pulumi version ==="
+CRD2PULUMI_ABS="$(command -v "$CRD2PULUMI")"
+
+echo "=== environment ==="
+uname -a
+python3 --version
+echo
+
+echo "=== crd2pulumi binary identity ==="
+echo "path: $CRD2PULUMI_ABS"
 "$CRD2PULUMI" version || true
+if command -v go >/dev/null 2>&1; then
+  go version -m "$CRD2PULUMI_ABS" 2>/dev/null \
+    | grep -E '^[[:space:]]*(path|mod)[[:space:]]+' || true
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "$CRD2PULUMI_ABS"
+elif command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 "$CRD2PULUMI_ABS"
+fi
 echo
 
 WORKDIR="$(cd "$(dirname "$0")" && pwd)"
@@ -74,4 +98,6 @@ if [ $RC -ne 0 ]; then
   exit 0
 fi
 
-echo "Import succeeded. Bug not reproduced (or upstream fix shipped)."
+echo "Import succeeded."
+echo "Expected on macOS - bug is platform-specific. On Linux this means"
+echo "either the upstream fix shipped or your binary differs from v1.6.1."
